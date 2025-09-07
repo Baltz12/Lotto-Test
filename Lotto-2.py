@@ -56,34 +56,40 @@ def co_occurrence(results):
                     co[a][b] += 1
     return co
 
-def predict_next_numbers(results, top_n=6, n_predictions=3):
+def predict_next_numbers_smart(results, top_n=6):
+    """
+    Generate one predicted set of numbers using frequency + weighted co-occurrence.
+    """
     freq = number_frequencies(results)
+    most_common = [n for n, _ in freq.most_common(10)]  # Top 10 frequent numbers
+
     co = co_occurrence(results)
-    top_nums = [n for n, _ in freq.most_common(20)]  # top 20 frequent numbers
 
-    predictions = []
-    for _ in range(n_predictions):
-        prediction = set()
+    # Start with 1-2 numbers from top frequent
+    start_count = random.choice([1, 2])
+    prediction = random.sample(most_common, start_count)
 
-        # Step 1: choose 1–2 seeds from top frequent numbers
-        seeds = random.sample(top_nums, k=min(2, len(top_nums)))
-        prediction.update(seeds)
+    # Fill remaining slots using co-occurrence weighted selection
+    while len(prediction) < top_n:
+        candidates = []
+        for n in prediction:
+            partners = co.get(n, {})
+            for partner, weight in partners.items():
+                if partner not in prediction:
+                    candidates.extend([partner] * weight)
+        if candidates:
+            prediction.append(random.choice(candidates))
+        else:
+            # fallback to frequent numbers if no co-occurring partners
+            remaining = [n for n in most_common if n not in prediction]
+            if remaining:
+                prediction.append(random.choice(remaining))
+            else:
+                # fallback to random from 1-58
+                remaining = [n for n in range(1, 59) if n not in prediction]
+                prediction.append(random.choice(remaining))
 
-        # Step 2: add their top co-occurring partners
-        for seed in seeds:
-            if seed in co:
-                sorted_partners = sorted(co[seed].items(), key=lambda x: x[1], reverse=True)
-                for partner, _ in sorted_partners[:2]:  # take up to 2 partners per seed
-                    if len(prediction) < top_n:
-                        prediction.add(partner)
-
-        # Step 3: fill the rest with frequent numbers
-        while len(prediction) < top_n:
-            prediction.add(random.choice(top_nums))
-
-        predictions.append(sorted(prediction))
-
-    return predictions
+    return sorted(prediction)
 
 # -----------------------------
 # Streamlit Application
@@ -104,8 +110,8 @@ if df.empty:
 # Ensure df["date"] is Timestamp
 df["date"] = pd.to_datetime(df["date"])
 
-# Date range filter
-default_start = df["date"].min().date()
+# Date range filter (default first day of month to latest draw)
+default_start = df["date"].min().replace(day=1).date()
 default_end = df["date"].max().date()
 start_date, end_date = st.date_input("Select date range", [default_start, default_end])
 
@@ -138,10 +144,14 @@ else:
     st.write("No data for that number in selected range.")
 
 # Prediction
-st.subheader("Next Draw (Heuristic Predictions)")
+st.subheader("Next Draw (Smart Predictions)")
 
-predictions = predict_next_numbers(df.to_dict("records"), top_n=6, n_predictions=3)
-for i, p in enumerate(predictions, 1):
+smart_predictions = []
+for _ in range(3):
+    pred = predict_next_numbers_smart(df.to_dict("records"))
+    smart_predictions.append(pred)
+
+for i, p in enumerate(smart_predictions, 1):
     st.success(f"Prediction {i}: {p}")
 
 # Export CSV
